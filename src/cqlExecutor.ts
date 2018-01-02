@@ -3,31 +3,35 @@ import cassandra = require('cassandra-driver');
 import resultDocProvider = require('./cqlResultDocumentProvider');
 import * as uuid from 'uuid';
 import * as util from 'util';
+import { stringify } from 'querystring';
 
 export let currentResults = {};
 let outputChannel = vscode.window.createOutputChannel(`CQL Output`);
 
 export function registerExecuteCommand() : vscode.Disposable {
     return vscode.commands.registerCommand('cql.execute', ()=> {
-        var statement = "";
+        var statements = "";
         if (vscode.window.activeTextEditor.selection.isEmpty) {
-            statement = vscode.window.activeTextEditor.document.getText();
+            statements = vscode.window.activeTextEditor.document.getText();
         }
         else {
             var selection = vscode.window.activeTextEditor.selection;
-            statement = vscode.window.activeTextEditor.document.getText(new vscode.Range(selection.start, selection.end));
+            statements = vscode.window.activeTextEditor.document.getText(new vscode.Range(selection.start, selection.end));
         }
-        executeCqlStatement(statement);
+
+        var clearedStatements = statements.replace(/(\n|\r)/gm,"\r\n")
+        .split("\r\n").filter(statementString => statementString != "")
+        .filter(statementString => !statementString.startsWith("//"));
         
+        clearedStatements.forEach(statement => executeCqlStatement(statement));
     });
 }
 
 export function executeCqlStatement(statement: string) {
     console.log('Configuring cql statement execution.');
-        
+
     let cassandraAddress = vscode.workspace.getConfiguration("cql")["address"];
     let cassandraPort = vscode.workspace.getConfiguration("cql")["port"];
-
     let cassandraConnectionOptions = vscode.workspace.getConfiguration("cql")["connection"];
 
     let clientOptions = !!cassandraConnectionOptions 
@@ -40,8 +44,7 @@ export function executeCqlStatement(statement: string) {
     console.log('Cassandra connection configuration', clientOptions);
     
     let client = new cassandra.Client(clientOptions);
-    
-    var statement = statement;
+
     console.log("statement: " + statement);
     outputChannel.show();
     outputChannel.appendLine(`Executing statement:"${statement}" against Cassandra @  + ${cassandraAddress}:${cassandraPort}`);
@@ -56,10 +59,9 @@ export function executeCqlStatement(statement: string) {
                 currentResults = result;
                 outputChannel.appendLine(`Execution successful.`)
             }
-
             showResults(err, result);
         });
-    });
+    });    
 }
 
 export function registerResultDocumentProvider() : vscode.Disposable {
@@ -78,12 +80,24 @@ function showResults(error, results) {
         outputChannel.appendLine(new Date().toTimeString());
         outputChannel.show();
     } else {
-        let resultUri = `cql-result://api/results${uuid.v4()}?error=${!!error}`;
-        vscode.commands.executeCommand('vscode.previewHtml', resultUri, vscode.ViewColumn.Two, 'Cassandra Execution Results')
-            .then((success) => {
-                //do nothing it worked already...
-            }, (reason) => {
-                vscode.window.showErrorMessage(reason);
-            });
+        var isResultBased = vscode.workspace.getConfiguration("cql")['resultStyle'].resultBased;
+        if(isResultBased)
+        {
+            var hasReturnedRows = false;
+            if (results.rowLength > 0)
+            {
+                hasReturnedRows = true;
+            }
+        }
+        if(hasReturnedRows)
+        {
+            let resultUri = `cql-result://api/results${uuid.v4()}?error=${!!error}`;
+            vscode.commands.executeCommand('vscode.previewHtml', resultUri, vscode.ViewColumn.Two, 'Cassandra Execution Results')
+                .then((success) => {
+                    //do nothing it worked already...
+                }, (reason) => {
+                    vscode.window.showErrorMessage(reason);
+                });
+        }
     }
 }
