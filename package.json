@@ -157,7 +157,8 @@
           "type": "object",
           "default": {
             "format": "tabular",
-            "location": "pane"
+            "location": "pane",
+            "resultBased": false
           }
         }
       }
